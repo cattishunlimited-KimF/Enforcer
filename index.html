@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Action Enforcement System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* 增加一點粗野主義的邊框感 */
+        .strict-border { border: 2px solid #18181b; box-shadow: 4px 4px 0px #18181b; }
+        .strict-border:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0px #18181b; }
+        .strict-border-static { border: 2px solid #18181b; box-shadow: 4px 4px 0px #18181b; }
+    </style>
+</head>
+<body class="bg-zinc-200 text-zinc-900 font-sans antialiased h-screen w-screen overflow-hidden flex justify-center selection:bg-black selection:text-white">
+
+    <!-- Toast Container (提醒系統) -->
+    <div id="toast-container" class="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2 pointer-events-none w-11/12 max-w-md"></div>
+
+    <!-- App Container -->
+    <div class="w-full max-w-md bg-white h-full relative flex flex-col border-x-2 border-zinc-800">
+        
+        <!-- Header -->
+        <header class="bg-zinc-900 text-zinc-50 p-4 flex justify-between items-center z-10 border-b-2 border-zinc-900">
+            <h1 class="font-black text-xl tracking-widest">ENFORCE<span class="text-red-500">.</span></h1>
+            <div class="flex items-center gap-3">
+                <button onclick="switchView('view-analytics')" class="text-xs font-bold text-zinc-400 hover:text-white transition">分析報告</button>
+                <div id="connection-status" class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse" title="Connecting..."></div>
+                <div class="text-xs font-bold bg-zinc-800 px-3 py-1 text-zinc-300 border border-zinc-600 hidden sm:block">PENALTY: OFF</div>
+            </div>
+        </header>
+
+        <!-- View 1: Dashboard (Task List) -->
+        <main id="view-dashboard" class="flex-1 flex flex-col overflow-y-auto p-5 no-scrollbar bg-zinc-50">
+            <div class="flex justify-between items-end mb-8 border-b-2 border-zinc-200 pb-4">
+                <div>
+                    <h2 class="text-3xl font-black tracking-tight text-zinc-900">任務清單</h2>
+                    <p id="dashboard-quote" class="text-sm text-zinc-500 mt-1 font-medium tracking-wide">系統連線中，請稍候...</p>
+                </div>
+                <button id="btn-create-task" onclick="checkAndOpenCreate()" class="bg-zinc-900 text-white w-12 h-12 flex items-center justify-center hover:bg-zinc-800 transition text-3xl pb-1 strict-border rounded-none opacity-50 cursor-not-allowed" disabled>
+                    +
+                </button>
+            </div>
+
+            <!-- Task List Container -->
+            <div id="task-list" class="space-y-5">
+                <div class="text-center py-10 text-zinc-400 font-bold border-2 border-dashed border-zinc-300">
+                    載入雲端資料中...
+                </div>
+            </div>
+        </main>
+
+        <!-- View 2: Create Task -->
+        <main id="view-create" class="flex-1 overflow-y-auto p-6 hidden flex-col bg-zinc-50">
+            <button onclick="switchView('view-dashboard')" class="text-zinc-500 mb-8 text-left flex items-center gap-2 hover:text-zinc-900 font-bold transition">
+                ← 返回前線
+            </button>
+            <h2 id="create-view-title" class="text-3xl font-black mb-8">宣告新任務</h2>
+            
+            <form id="create-task-form" class="space-y-8 flex-1" onsubmit="handleCreateTask(event)">
+                <div>
+                    <label class="block text-sm font-black mb-2 tracking-wide">任務名稱 (必定要完成的事)</label>
+                    <input type="text" id="task-title" required placeholder="例如：寫完首頁程式碼" class="w-full bg-transparent border-b-2 border-zinc-300 py-3 focus:outline-none focus:border-zinc-900 transition text-lg font-medium">
+                </div>
+                <div>
+                    <label class="block text-sm font-black mb-2 tracking-wide">截止時間 (Deadline)</label>
+                    <input type="datetime-local" id="task-deadline" required class="w-full bg-transparent border-b-2 border-zinc-300 py-3 focus:outline-none focus:border-zinc-900 transition text-lg font-medium">
+                </div>
+                <div>
+                    <label class="block text-sm font-black mb-2 tracking-wide">任務說明 (選填)</label>
+                    <textarea id="task-desc" class="w-full border-2 border-zinc-300 p-3 focus:outline-none focus:border-zinc-900 transition text-sm font-medium bg-transparent" rows="2" placeholder="寫下具體要完成的細節..."></textarea>
+                </div>
+                <div class="bg-zinc-200 p-4 border-l-4 border-zinc-500 text-sm text-zinc-700 font-medium">
+                    💡 提醒：立下誓言後請全力以赴。若錯過截止時間，系統會強制要求你記錄卡關原因。請確保目標合理。
+                </div>
+                
+                <button id="create-submit-btn" type="submit" class="w-full bg-zinc-900 text-white py-4 font-black text-lg transition mt-8 strict-border rounded-none">
+                    立下誓言 (SAVE)
+                </button>
+            </form>
+        </main>
+
+        <!-- View 3: Focus Mode -->
+        <main id="view-focus" class="absolute inset-0 bg-zinc-900 text-zinc-50 z-20 hidden flex-col overflow-y-auto no-scrollbar">
+            <div class="flex-1 flex flex-col items-center justify-center p-6 text-center w-full min-h-max py-16">
+                <button onclick="switchView('view-dashboard')" class="absolute top-6 left-6 text-zinc-400 hover:text-white font-bold tracking-wide">
+                    ← 縮小視窗
+                </button>
+                
+                <p class="text-red-500 font-black mb-4 tracking-widest uppercase text-sm border border-red-500 px-3 py-1 mt-8">Focus Mode</p>
+                <h2 id="focus-title" class="text-3xl font-black mb-4 px-4 leading-tight">任務名稱</h2>
+                <p id="focus-desc" class="text-zinc-400 mb-8 max-w-sm mx-auto text-sm"></p>
+                
+                <!-- Giant Timer (縮小為 text-5xl 以適應長文字，確保不擠壓按鈕) -->
+                <div id="focus-timer" class="font-mono text-5xl md:text-6xl font-light tracking-tighter mb-4 text-white w-full px-2">
+                    00:00:00
+                </div>
+                <p class="text-zinc-400 mb-10 font-medium tracking-wide">距離截止時間剩餘時間</p>
+
+                <div class="w-full max-w-xs space-y-4">
+                    <!-- 完成按鈕永遠顯示 -->
+                    <button id="focus-btn-complete" onclick="completeFocusTask()" class="w-full bg-zinc-50 text-zinc-900 py-4 font-black text-xl hover:bg-zinc-200 transition">
+                        任務完成 (COMPLETE)
+                    </button>
+                    <button onclick="abandonFocusTask()" class="w-full bg-transparent border-2 border-red-900 text-red-500 py-4 font-black hover:bg-red-950 transition">
+                        我放棄了 (GIVE UP)
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- View 4: Failure Input -->
+        <main id="view-failure" class="absolute inset-0 bg-zinc-50 z-30 hidden flex-col p-6 overflow-y-auto no-scrollbar">
+            <h2 class="text-4xl font-black mt-8 mb-2 text-zinc-800 tracking-tight">任務覆盤</h2>
+            <p class="text-zinc-500 mb-8 font-medium">找出卡關的原因，我們下次做得更好。這會成為你的成長數據。</p>
+
+            <form id="failure-form" onsubmit="submitFailure(event)">
+                <div class="space-y-3 mb-8">
+                    <label class="flex items-center p-4 border-2 border-zinc-200 cursor-pointer hover:border-zinc-900 transition bg-white">
+                        <input type="radio" name="reason" value="太累了 (Too tired)" required class="w-5 h-5 text-zinc-900 focus:ring-zinc-900">
+                        <span class="ml-3 font-bold text-zinc-800">太累了 (Too tired)</span>
+                    </label>
+                    <label class="flex items-center p-4 border-2 border-zinc-200 cursor-pointer hover:border-zinc-900 transition bg-white">
+                        <input type="radio" name="reason" value="壓力太大 (Too stressed)" class="w-5 h-5 text-zinc-900 focus:ring-zinc-900">
+                        <span class="ml-3 font-bold text-zinc-800">壓力太大 (Too stressed)</span>
+                    </label>
+                    <label class="flex items-center p-4 border-2 border-zinc-200 cursor-pointer hover:border-zinc-900 transition bg-white">
+                        <input type="radio" name="reason" value="滑手機/被分心 (Distracted)" class="w-5 h-5 text-zinc-900 focus:ring-zinc-900">
+                        <span class="ml-3 font-bold text-zinc-800">滑手機/被分心 (Distracted)</span>
+                    </label>
+                    <label class="flex items-center p-4 border-2 border-zinc-200 cursor-pointer hover:border-zinc-900 transition bg-white">
+                        <input type="radio" name="reason" value="不知道從何開始 (Didn't know how)" class="w-5 h-5 text-zinc-900 focus:ring-zinc-900">
+                        <span class="ml-3 font-bold text-zinc-800">不知道從何開始 (Didn't know how)</span>
+                    </label>
+                    <label class="flex items-center p-4 border-2 border-zinc-200 cursor-pointer hover:border-zinc-900 transition bg-white">
+                        <input type="radio" name="reason" value="時間不夠/突發狀況 (Unexpected)" class="w-5 h-5 text-zinc-900 focus:ring-zinc-900">
+                        <span class="ml-3 font-bold text-zinc-800">時間不夠/突發狀況 (Unexpected)</span>
+                    </label>
+                </div>
+
+                <div class="mb-12">
+                    <label class="block text-sm font-black mb-2 text-zinc-900 tracking-wide">其他藉口 (選填)</label>
+                    <textarea id="failure-notes" class="w-full border-2 border-zinc-300 p-4 focus:outline-none focus:border-zinc-900 transition font-medium bg-white" rows="3" placeholder="寫下你的藉口..."></textarea>
+                </div>
+
+                <div class="mt-auto pb-6">
+                    <button type="submit" class="w-full bg-zinc-900 text-white py-4 font-black text-lg hover:bg-zinc-800 transition strict-border rounded-none">
+                        記錄原因，重新出發 (SAVE & RESTART)
+                    </button>
+                    <button type="button" onclick="switchView('view-dashboard')" class="w-full text-center text-zinc-500 py-4 mt-2 hover:text-zinc-900 font-bold transition">
+                        返回清單
+                    </button>
+                </div>
+            </form>
+        </main>
+
+        <!-- View 5: Analytics -->
+        <main id="view-analytics" class="flex-1 overflow-y-auto p-6 hidden flex-col bg-zinc-50">
+            <button onclick="switchView('view-dashboard')" class="text-zinc-500 mb-8 text-left flex items-center gap-2 hover:text-zinc-900 font-bold transition">
+                ← 返回前線
+            </button>
+            <h2 class="text-3xl font-black mb-8">分析報告</h2>
+            
+            <div class="grid grid-cols-2 gap-4 mb-8">
+                <div class="bg-white p-6 strict-border-static">
+                    <h3 class="text-sm font-bold text-zinc-500 mb-2">準時完成率</h3>
+                    <div id="analytics-rate-ontime" class="text-4xl font-black text-green-600">0%</div>
+                </div>
+                <div class="bg-white p-6 strict-border-static">
+                    <h3 class="text-sm font-bold text-zinc-500 mb-2">壓線/逾期完成</h3>
+                    <div id="analytics-rate-late" class="text-4xl font-black text-yellow-600">0%</div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 strict-border-static">
+                <h3 class="text-sm font-bold text-zinc-500 mb-4">卡關瓶頸分析</h3>
+                <div id="analytics-reasons" class="space-y-2">
+                    <!-- Reasons injected here -->
+                </div>
+            </div>
+        </main>
+
+    </div>
+
+    <!-- 導入 Firebase 模組 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 名言庫
+        const quotes = [
+            "種一棵樹最好的時間是十年前，其次是現在。",
+            "拖延是一場對自己的信用破產。",
+            "行動是治癒恐懼的良藥，猶豫拖延將不斷滋養恐懼。",
+            "完美主義是拖延症最華麗的藉口。",
+            "你不需要很厲害才能開始，但你需要開始才會很厲害。",
+            "明天的你，不會比今天的你更想做這件事。",
+            "把任務切小，小到你不好意思拖延。",
+            "時間不會等你，它只會無情地流逝。",
+            "最困難的總是第一步，踏出去就解決了一半。",
+            "不要等靈感，靈感是留給正在行動的人。"
+        ];
+
+        // 狀態管理 
+        let tasks = [];
+        let currentFocusTaskId = null;
+        let failingTaskId = null;
+        let timerInterval = null;
+        let editingTaskId = null;
+        let hasRequestedNotification = false; 
+
+        // Firebase 基礎設施
+        let db, auth, userId;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'enforce-app';
+        let isDataLoaded = false;
+
+        // --- 警報音效模組 (Audio Fallback) ---
+        window.playAlertSound = () => {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContext) return;
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'square'; // 尖銳的電子音
+                osc.frequency.setValueAtTime(800, ctx.currentTime);
+                gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.15); // 短促的嗶聲
+            } catch(e) {
+                console.log("Audio play failed", e);
+            }
+        };
+
+        // 要求桌面通知權限
+        window.requestNotificationPermission = () => {
+            if ("Notification" in window && !hasRequestedNotification) {
+                if (Notification.permission === "default") {
+                    hasRequestedNotification = true; 
+                    Notification.requestPermission().then(permission => {
+                        if (permission === "granted") {
+                            showToast("✅ 桌面通知已成功啟用！", "warning");
+                        }
+                    }).catch(e => console.warn("通知權限請求失敗:", e));
+                }
+            }
+        };
+
+        // --- Firebase 初始化流程 ---
+        const initFirebase = async () => {
+            try {
+                const myFirebaseConfig = {
+                    apiKey: "AIzaSyCrWudNpU98NiynYRdT4O52wJEpjr7EK_Q",
+                    authDomain: "enforce-app-ffeec.firebaseapp.com",
+                    projectId: "enforce-app-ffeec",
+                    storageBucket: "enforce-app-ffeec.firebasestorage.app",
+                    messagingSenderId: "1095776342937",
+                    appId: "1:1095776342937:web:85c1673225acfaa91e3908"
+                };
+
+                let configToUse = myFirebaseConfig;
+                if (myFirebaseConfig.apiKey === "YOUR_API_KEY" && typeof __firebase_config !== 'undefined') {
+                    configToUse = JSON.parse(__firebase_config);
+                }
+
+                const app = initializeApp(configToUse);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    try {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } catch (tokenError) {
+                        console.warn("Token mismatch (using custom Firebase project). Falling back to anonymous sign-in.", tokenError);
+                        await signInAnonymously(auth);
+                    }
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        setupRealtimeSync();
+                        document.getElementById('connection-status').classList.replace('bg-yellow-500', 'bg-green-500');
+                        document.getElementById('connection-status').classList.remove('animate-pulse');
+                        document.getElementById('connection-status').title = "Connected";
+                        document.getElementById('btn-create-task').classList.remove('opacity-50', 'cursor-not-allowed');
+                        document.getElementById('btn-create-task').removeAttribute('disabled');
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase init fail:", error);
+                showToast("連線異常，請檢查你的 Firebase Config 是否填寫正確", "danger");
+                document.getElementById('connection-status').classList.replace('bg-yellow-500', 'bg-red-500');
+            }
+        };
+
+        // --- 建立即時同步監聽 ---
+        const setupRealtimeSync = () => {
+            if (!userId) return;
+            const tasksRef = collection(db, 'artifacts', appId, 'users', userId, 'tasks');
+            
+            onSnapshot(tasksRef, (snapshot) => {
+                tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                isDataLoaded = true;
+                
+                renderTasks();
+                if (!document.getElementById('view-analytics').classList.contains('hidden')) {
+                    renderAnalytics();
+                }
+            }, (error) => {
+                console.error("Firestore sync error:", error);
+                showToast("資料同步失敗，請檢查網路連線或資料庫權限設定", "danger");
+            });
+        };
+
+        // --- 視圖切換 ---
+        window.switchView = (viewId) => {
+            const views = ['view-dashboard', 'view-create', 'view-focus', 'view-failure', 'view-analytics'];
+            views.forEach(id => {
+                const el = document.getElementById(id);
+                if(el) {
+                    el.classList.add('hidden');
+                    el.classList.remove('flex');
+                }
+            });
+            const targetView = document.getElementById(viewId);
+            if(targetView) {
+                targetView.classList.remove('hidden');
+                targetView.classList.add('flex');
+            }
+            
+            if (viewId === 'view-dashboard' && isDataLoaded) renderTasks();
+            if (viewId === 'view-analytics' && isDataLoaded) renderAnalytics();
+        };
+
+        // --- UI 操作邏輯 ---
+        window.checkAndOpenCreate = () => {
+            window.requestNotificationPermission(); 
+            
+            const activeTasks = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
+            if (activeTasks >= 10) {
+                showToast('⚠️ 負載過重！目前已有 10 個未完成任務，請先清空再新增。', 'danger');
+                return;
+            }
+            
+            editingTaskId = null;
+            document.getElementById('create-view-title').innerText = "宣告新任務";
+            document.getElementById('create-submit-btn').innerText = "立下誓言 (SAVE)";
+            document.getElementById('create-task-form').reset();
+            
+            switchView('view-create');
+        };
+
+        window.editTask = (id) => {
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            
+            editingTaskId = id;
+            document.getElementById('task-title').value = task.title;
+            document.getElementById('task-desc').value = task.desc || '';
+            
+            const d = new Date(task.deadline);
+            const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+            const localISOTime = (new Date(d - tzoffset)).toISOString().slice(0, 16);
+            document.getElementById('task-deadline').value = localISOTime;
+
+            document.getElementById('create-view-title').innerText = "修改任務";
+            document.getElementById('create-submit-btn').innerText = "更新誓言 (UPDATE)";
+            
+            switchView('view-create');
+        };
+
+        window.handleCreateTask = async (e) => {
+            e.preventDefault();
+            if (!userId) return;
+
+            const title = document.getElementById('task-title').value;
+            const deadline = document.getElementById('task-deadline').value;
+            const desc = document.getElementById('task-desc').value;
+            
+            if (!title || !deadline) return;
+
+            const deadlineMs = new Date(deadline).getTime();
+            const now = new Date().getTime();
+            
+            if (deadlineMs <= now) {
+                showToast('⚠️ 時間設定錯誤！請設定未來的時間。', 'danger');
+                return;
+            }
+
+            const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
+            if (deadlineMs - now > twoWeeksMs) {
+                showToast('⚠️ 目標範圍過大！請將任務切小，截止時間不可超過兩週。', 'danger');
+                return;
+            }
+
+            try {
+                if (editingTaskId) {
+                    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', editingTaskId), {
+                        title: title,
+                        desc: desc,
+                        deadline: deadlineMs,
+                        reminders: { p80: false, p90: false, p95: false, overdue: false, graceExpired: false }
+                    });
+                    editingTaskId = null;
+                } else {
+                    const newId = Date.now().toString() + Math.floor(Math.random()*1000);
+                    await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', newId), {
+                        title: title,
+                        desc: desc,
+                        deadline: deadlineMs,
+                        startTime: null,
+                        status: 'pending', 
+                        failReason: null,
+                        isGraceExpired: false, 
+                        reminders: { p80: false, p90: false, p95: false, overdue: false, graceExpired: false }
+                    });
+                }
+                switchView('view-dashboard');
+            } catch (err) {
+                showToast('儲存失敗，請重試', 'danger');
+            }
+        };
+
+        window.startTask = async (id) => {
+            if (!userId) return;
+            window.requestNotificationPermission(); 
+            try {
+                await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id), {
+                    status: 'in_progress',
+                    startTime: new Date().getTime()
+                });
+            } catch(e) {
+                showToast('啟陪失敗，請重試', 'danger');
+            }
+        };
+
+        window.enterFocusMode = (id) => {
+            const task = tasks.find(t => t.id === id);
+            if (task) {
+                currentFocusTaskId = id;
+                document.getElementById('focus-title').innerText = task.title;
+                document.getElementById('focus-desc').innerText = task.desc || '';
+                switchView('view-focus');
+                updateTimers(); 
+            }
+        };
+
+        window.completeTask = async (id) => {
+            if (!userId) return;
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            
+            const now = new Date().getTime();
+            const totalDuration = task.startTime ? (task.deadline - task.startTime) : 0;
+            const gracePeriod = totalDuration * 0.10;
+            
+            try {
+                await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id), {
+                    status: 'completed',
+                    completedOverdue: now > task.deadline,
+                    extremeOverdue: now > (task.deadline + gracePeriod)
+                });
+                if (currentFocusTaskId === id) currentFocusTaskId = null;
+                switchView('view-dashboard');
+            } catch(e) {
+                showToast('狀態更新失敗，請重試', 'danger');
+            }
+        };
+
+        window.completeFocusTask = () => {
+            if(currentFocusTaskId) window.completeTask(currentFocusTaskId);
+        };
+
+        window.abandonFocusTask = () => {
+            if(currentFocusTaskId) window.openFailureScreen(currentFocusTaskId);
+        };
+
+        window.openFailureScreen = (id) => {
+            failingTaskId = id;
+            document.getElementById('failure-form').reset();
+            switchView('view-failure');
+        };
+
+        window.submitFailure = async (e) => {
+            e.preventDefault();
+            if (!userId || !failingTaskId) return;
+
+            const reason = document.querySelector('input[name="reason"]:checked').value;
+            const notes = document.getElementById('failure-notes').value;
+            const fullReason = reason + (notes ? ` - ${notes}` : '');
+            
+            try {
+                await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', failingTaskId), {
+                    status: 'failed',
+                    failReason: fullReason
+                });
+                failingTaskId = null;
+                if (currentFocusTaskId === failingTaskId) currentFocusTaskId = null;
+                switchView('view-dashboard');
+            } catch(err) {
+                showToast('提交失敗，請重試', 'danger');
+            }
+        };
+
+        // --- 核心邏輯 ---
+        function getRemainingTimeString(deadlineMs) {
+            const now = new Date().getTime();
+            const diff = deadlineMs - now;
+            const isOverdue = diff <= 0;
+            const absDiff = Math.abs(diff);
+
+            const hours = Math.floor(absDiff / (1000 * 60 * 60));
+            const minutes = Math.floor((absDiff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((absDiff % (1000 * 60)) / 1000);
+
+            const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            return isOverdue ? `-${timeStr} (已逾期)` : timeStr;
+        }
+
+        function renderTasks() {
+            const listContainer = document.getElementById('task-list');
+            document.getElementById('dashboard-quote').innerText = quotes[Math.floor(Math.random() * quotes.length)];
+            
+            if (tasks.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-10 text-zinc-400 font-bold border-2 border-dashed border-zinc-300">
+                        目前沒有任務。<br>建立一個目標，開始行動。
+                    </div>`;
+                return;
+            }
+
+            const sortedTasks = [...tasks].sort((a, b) => {
+                const statusOrder = { 'in_progress': 1, 'pending': 2, 'completed': 3, 'failed': 4 };
+                return statusOrder[a.status] - statusOrder[b.status];
+            });
+
+            listContainer.innerHTML = sortedTasks.map(task => {
+                const deadlineDate = new Date(task.deadline);
+                const deadlineStr = `${deadlineDate.getMonth()+1}/${deadlineDate.getDate()} ${String(deadlineDate.getHours()).padStart(2,'0')}:${String(deadlineDate.getMinutes()).padStart(2,'0')}`;
+                
+                let cardHTML = '';
+                
+                if (task.status === 'pending') {
+                    cardHTML = `
+                        <div class="bg-white p-5 strict-border-static">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="font-black text-lg text-zinc-900">${task.title}</h3>
+                                <span class="text-xs font-black px-2 py-1 bg-zinc-200 text-zinc-800 border border-zinc-400">STANDBY</span>
+                            </div>
+                            ${task.desc ? `<div class="text-sm text-zinc-600 mb-3 line-clamp-2">${task.desc}</div>` : ''}
+                            <div class="text-sm font-bold text-zinc-500 mb-4">截止時間：${deadlineStr}</div>
+                            <div class="flex gap-2">
+                                <button onclick="editTask('${task.id}')" class="bg-zinc-200 text-zinc-700 px-4 py-3 font-black hover:bg-zinc-300 transition text-sm">修改</button>
+                                <button onclick="startTask('${task.id}')" class="flex-1 bg-zinc-900 text-white py-3 font-black hover:bg-zinc-800 transition">開始執行 (START)</button>
+                            </div>
+                        </div>`;
+                } else if (task.status === 'in_progress') {
+                    cardHTML = `
+                        <div class="bg-zinc-900 text-white p-5 strict-border-static">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="font-black text-lg">${task.title}</h3>
+                                <span class="text-xs font-black px-2 py-1 bg-red-600 text-white">ACTIVE</span>
+                            </div>
+                            ${task.desc ? `<div class="text-sm text-zinc-400 mb-3 line-clamp-2">${task.desc}</div>` : ''}
+                            <div class="text-2xl font-mono text-red-400 font-light tracking-widest mb-4 timer-display" data-deadline="${task.deadline}">
+                                ${getRemainingTimeString(task.deadline)}
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="enterFocusMode('${task.id}')" class="flex-1 bg-zinc-700 text-white py-2 font-black hover:bg-zinc-600 transition text-sm">專注模式</button>
+                                <button onclick="completeTask('${task.id}')" class="flex-1 bg-white text-zinc-900 py-2 font-black hover:bg-zinc-200 transition text-sm">完成</button>
+                                <button onclick="openFailureScreen('${task.id}')" class="bg-transparent border border-zinc-600 text-zinc-400 px-3 py-2 font-black hover:text-red-400 hover:border-red-400 transition text-sm">放棄</button>
+                            </div>
+                        </div>`;
+                } else if (task.status === 'completed') {
+                    let badgeClass = "bg-green-200 text-green-900 border-green-300";
+                    let badgeText = "DONE";
+                    if (task.extremeOverdue) {
+                        badgeClass = "bg-red-200 text-red-900 border-red-300";
+                        badgeText = "💀 DONE (EXTREME)";
+                    } else if (task.completedOverdue) {
+                        badgeClass = "bg-yellow-200 text-yellow-900 border-yellow-300";
+                        badgeText = "DONE (LATE)";
+                    }
+                    cardHTML = `
+                        <div class="bg-zinc-100 p-5 border-2 border-zinc-200 opacity-70">
+                            <div class="flex justify-between items-start">
+                                <h3 class="font-black text-lg text-zinc-700 line-through">${task.title}</h3>
+                                <span class="text-xs font-black px-2 py-1 ${badgeClass} border">${badgeText}</span>
+                            </div>
+                        </div>`;
+                } else if (task.status === 'failed') {
+                    cardHTML = `
+                        <div class="bg-red-50 p-5 border-2 border-red-200 opacity-90">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="font-black text-lg text-red-900 line-through">${task.title}</h3>
+                                <span class="text-xs font-black px-2 py-1 bg-red-200 text-red-900 border border-red-300">RESTART</span>
+                            </div>
+                            <div class="text-sm font-bold text-red-700">卡關原因：${task.failReason}</div>
+                        </div>`;
+                }
+                return cardHTML;
+            }).join('');
+        }
+
+        function updateTimers() {
+            if (!userId || tasks.length === 0) return;
+            const now = new Date().getTime();
+
+            tasks.forEach(task => {
+                if (!task.reminders) task.reminders = { p80: false, p90: false, p95: false, overdue: false, graceExpired: false };
+                let needCloudUpdate = false;
+
+                if (task.status === 'in_progress' && task.startTime) {
+                    const totalDuration = task.deadline - task.startTime;
+                    const elapsed = now - task.startTime;
+                    const percent = elapsed / totalDuration;
+                    
+                    const gracePeriod = totalDuration * 0.10;
+                    const timeOverdue = now - task.deadline;
+                    const remainingStr = getRemainingTimeString(task.deadline).replace('-', '').replace(' (已逾期)', '');
+
+                    if (timeOverdue > gracePeriod) {
+                        if (!task.reminders.graceExpired) {
+                            showToast(`💀 任務「${task.title}」已超過 10% 緩衝期！這是一場苦戰，但你仍可完成它。`, 'danger');
+                            task.reminders.graceExpired = true;
+                            task.isGraceExpired = true;
+                            needCloudUpdate = true;
+                        }
+                    } else if (percent >= 1 && !task.reminders.overdue) {
+                        showToast(`⚠️ 任務「${task.title}」已逾期！你進入了 10% 緩衝期，請盡速完成。`, 'warning');
+                        task.reminders.overdue = true;
+                        task.reminders.p95 = true;
+                        task.reminders.p90 = true;
+                        task.reminders.p80 = true;
+                        needCloudUpdate = true;
+                    } else if (percent >= 0.95 && percent < 1 && !task.reminders.p95) {
+                        showToast(`🔥 截止時間逼近：任務「${task.title}」只剩下 ${remainingStr}！`, 'danger');
+                        task.reminders.p95 = true;
+                        task.reminders.p90 = true;
+                        task.reminders.p80 = true;
+                        needCloudUpdate = true;
+                    } else if (percent >= 0.90 && percent < 0.95 && !task.reminders.p90) {
+                        showToast(`⚠️ 危險：任務「${task.title}」只剩下 ${remainingStr}！`, 'warning');
+                        task.reminders.p90 = true;
+                        task.reminders.p80 = true;
+                        needCloudUpdate = true;
+                    } else if (percent >= 0.80 && percent < 0.90 && !task.reminders.p80) {
+                        showToast(`⏱️ 警告：任務「${task.title}」剩下 ${remainingStr}！`, 'warning');
+                        task.reminders.p80 = true;
+                        needCloudUpdate = true;
+                    }
+                } else if (task.status === 'pending') {
+                    const diff = task.deadline - now;
+                    if (diff <= 0 && !task.reminders.overdue) {
+                        showToast(`💀 任務「${task.title}」未開始就已逾期！`, 'danger');
+                        task.reminders.overdue = true;
+                        needCloudUpdate = true;
+                    }
+                }
+
+                // 為了避免頻繁寫入資料庫，只在跨越提醒邊界時才更新雲端紀錄
+                if (needCloudUpdate) {
+                    updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', task.id), {
+                        reminders: task.reminders,
+                        isGraceExpired: task.isGraceExpired || false
+                    }).catch(e => console.error("Reminder update failed", e));
+                }
+            });
+
+            const displays = document.querySelectorAll('.timer-display');
+            displays.forEach(display => {
+                const deadline = parseInt(display.getAttribute('data-deadline'));
+                display.innerText = getRemainingTimeString(deadline);
+            });
+
+            if (currentFocusTaskId && !document.getElementById('view-focus').classList.contains('hidden')) {
+                const task = tasks.find(t => t.id === currentFocusTaskId);
+                if (task) {
+                    document.getElementById('focus-timer').innerText = getRemainingTimeString(task.deadline);
+                }
+            }
+        }
+
+        function showToast(message, type='warning') {
+            // 1. 網頁內部的 Toast 提示
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-3 rounded shadow-lg font-bold text-sm transform transition-all duration-300 -translate-y-10 opacity-0 ${type === 'warning' ? 'bg-zinc-800 text-white border border-zinc-600' : 'bg-red-600 text-white'}`;
+            toast.innerText = message;
+            container.appendChild(toast);
+            
+            requestAnimationFrame(() => {
+                toast.classList.remove('-translate-y-10', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+
+            // 2. 如果是嚴重警告(danger)，強制發出警報音效
+            if (type === 'danger') {
+                window.playAlertSound();
+            }
+
+            // 3. 觸發系統級桌面通知 (加裝 try-catch 防護，避免瀏覽器安全限制導致當機)
+            try {
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("ENFORCE. 系統警告", {
+                        body: message,
+                        icon: "https://cdn-icons-png.flaticon.com/512/179/179386.png" 
+                    });
+                }
+            } catch (error) {
+                console.warn("桌面通知無法顯示 (可能是受限於本機 file:// 或跨網域限制):", error);
+            }
+        }
+
+        function renderAnalytics() {
+            const total = tasks.filter(t => t.status === 'completed' || t.status === 'failed').length;
+            const onTime = tasks.filter(t => t.status === 'completed' && !t.completedOverdue).length;
+            const late = tasks.filter(t => t.status === 'completed' && t.completedOverdue).length;
+            
+            const onTimeRate = total > 0 ? Math.round((onTime / total) * 100) : 0;
+            const lateRate = total > 0 ? Math.round((late / total) * 100) : 0;
+            
+            document.getElementById('analytics-rate-ontime').innerText = `${onTimeRate}%`;
+            document.getElementById('analytics-rate-late').innerText = `${lateRate}%`;
+            
+            const reasons = {};
+            tasks.filter(t => t.status === 'failed').forEach(t => {
+                if(!t.failReason) return;
+                const r = t.failReason.split(' - ')[0]; 
+                reasons[r] = (reasons[r] || 0) + 1;
+            });
+            
+            const reasonsHtml = Object.entries(reasons).map(([reason, count]) => {
+                return `<div class="flex justify-between border-b border-zinc-200 py-3">
+                    <span class="font-bold text-zinc-700">${reason}</span>
+                    <span class="font-black text-red-600">${count} 次</span>
+                </div>`;
+            }).join('');
+
+            document.getElementById('analytics-reasons').innerHTML = reasonsHtml || '<div class="text-zinc-400 font-bold py-4">目前沒有卡關紀錄。請繼續保持紀律。</div>';
+        }
+
+        // 啟動流程
+        initFirebase();
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(updateTimers, 1000);
+
+    </script>
+</body>
+</html>
