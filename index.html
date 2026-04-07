@@ -219,11 +219,14 @@
         let isDataLoaded = false;
 
         // --- 桌面通知管理模組 ---
-        const checkNotificationStatus = () => {
+        window.checkNotificationStatus = () => {
+            const btn = document.getElementById('btn-enable-notify');
+            if (!btn) return;
+            
             if ("Notification" in window && Notification.permission !== "granted") {
-                document.getElementById('btn-enable-notify').classList.remove('hidden');
-            } else if ("Notification" in window && Notification.permission === "granted") {
-                document.getElementById('btn-enable-notify').classList.add('hidden');
+                btn.classList.remove('hidden');
+            } else {
+                btn.classList.add('hidden');
             }
         };
 
@@ -272,20 +275,6 @@
                 osc.stop(ctx.currentTime + 0.15); // 短促的嗶聲
             } catch(e) {
                 console.log("Audio play failed", e);
-            }
-        };
-
-        // 要求桌面通知權限
-        window.requestNotificationPermission = () => {
-            if ("Notification" in window && !hasRequestedNotification) {
-                if (Notification.permission === "default") {
-                    hasRequestedNotification = true; 
-                    Notification.requestPermission().then(permission => {
-                        if (permission === "granted") {
-                            showToast("✅ 桌面通知已成功啟用！", "warning");
-                        }
-                    }).catch(e => console.warn("通知權限請求失敗:", e));
-                }
             }
         };
 
@@ -380,8 +369,6 @@
 
         // --- UI 操作邏輯 ---
         window.checkAndOpenCreate = () => {
-            window.requestNotificationPermission(); 
-            
             const activeTasks = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
             if (activeTasks >= 10) {
                 showToast('⚠️ 負載過重！目前已有 10 個未完成任務，請先清空再新增。', 'danger');
@@ -440,8 +427,9 @@
             }
 
             try {
+                // 🚀 樂觀更新 (Optimistic UI)：拔除 await，不等待伺服器回傳，讓畫面瞬間切換！
                 if (editingTaskId) {
-                    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', editingTaskId), {
+                    updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', editingTaskId), {
                         title: title,
                         desc: desc,
                         deadline: deadlineMs,
@@ -450,7 +438,7 @@
                     editingTaskId = null;
                 } else {
                     const newId = Date.now().toString() + Math.floor(Math.random()*1000);
-                    await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', newId), {
+                    setDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', newId), {
                         title: title,
                         desc: desc,
                         deadline: deadlineMs,
@@ -461,7 +449,13 @@
                         reminders: { p80: false, p90: false, p95: false, overdue: false, graceExpired: false }
                     });
                 }
+                
+                // 瞬間清除表單並切換回主畫面，讓手感無比滑順
+                document.getElementById('task-title').value = '';
+                document.getElementById('task-deadline').value = '';
+                document.getElementById('task-desc').value = '';
                 switchView('view-dashboard');
+                
             } catch (err) {
                 showToast('儲存失敗，請重試', 'danger');
             }
@@ -469,9 +463,9 @@
 
         window.startTask = async (id) => {
             if (!userId) return;
-            window.requestNotificationPermission(); 
             try {
-                await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id), {
+                // 這裡一樣拔除 await，追求瞬間反應
+                updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id), {
                     status: 'in_progress',
                     startTime: new Date().getTime()
                 });
@@ -501,7 +495,7 @@
             const gracePeriod = totalDuration * 0.10;
             
             try {
-                await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id), {
+                updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id), {
                     status: 'completed',
                     completedOverdue: now > task.deadline,
                     extremeOverdue: now > (task.deadline + gracePeriod)
@@ -536,7 +530,7 @@
             const fullReason = reason + (notes ? ` - ${notes}` : '');
             
             try {
-                await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', failingTaskId), {
+                updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', failingTaskId), {
                     status: 'failed',
                     failReason: fullReason
                 });
@@ -758,7 +752,7 @@
                     });
                 }
             } catch (error) {
-                console.warn("桌面通知無法顯示 (可能是受限於本機 file:// 或跨網域限制):", error);
+                console.warn("桌面通知無法顯示:", error);
             }
         }
 
@@ -792,9 +786,13 @@
 
         // 啟動流程
         initFirebase();
-        checkNotificationStatus();
+        
+        // 核心計時器與自動狀態更新
         if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(updateTimers, 1000);
+        timerInterval = setInterval(() => {
+            updateTimers();
+            window.checkNotificationStatus(); // 每秒檢查一次權限狀態，確保按鈕必定出現
+        }, 1000);
 
     </script>
 </body>
