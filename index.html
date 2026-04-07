@@ -189,7 +189,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // 名言庫
         const quotes = [
@@ -369,6 +369,8 @@
 
         // --- UI 操作邏輯 ---
         window.checkAndOpenCreate = () => {
+            window.requestNotificationPermission(); 
+            
             const activeTasks = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
             if (activeTasks >= 10) {
                 showToast('⚠️ 負載過重！目前已有 10 個未完成任務，請先清空再新增。', 'danger');
@@ -507,6 +509,18 @@
             }
         };
 
+        // --- 刪除任務功能 ---
+        window.deleteTask = async (id) => {
+            if (!userId) return;
+            try {
+                // 直接從雲端刪除文件
+                await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id));
+                showToast("任務紀錄已永久刪除", "warning");
+            } catch(e) {
+                showToast("刪除失敗，請檢查網路連線", "danger");
+            }
+        };
+
         window.completeFocusTask = () => {
             if(currentFocusTaskId) window.completeTask(currentFocusTaskId);
         };
@@ -622,10 +636,13 @@
                         badgeText = "DONE (LATE)";
                     }
                     cardHTML = `
-                        <div class="bg-zinc-100 p-5 border-2 border-zinc-200 opacity-70">
+                        <div class="bg-zinc-100 p-5 border-2 border-zinc-200 opacity-80">
                             <div class="flex justify-between items-start">
                                 <h3 class="font-black text-lg text-zinc-700 line-through">${task.title}</h3>
                                 <span class="text-xs font-black px-2 py-1 ${badgeClass} border">${badgeText}</span>
+                            </div>
+                            <div class="flex justify-end mt-4">
+                                <button onclick="deleteTask('${task.id}')" class="text-xs font-bold text-zinc-400 hover:text-red-500 transition">刪除紀錄</button>
                             </div>
                         </div>`;
                 } else if (task.status === 'failed') {
@@ -636,6 +653,9 @@
                                 <span class="text-xs font-black px-2 py-1 bg-red-200 text-red-900 border border-red-300">RESTART</span>
                             </div>
                             <div class="text-sm font-bold text-red-700">卡關原因：${task.failReason}</div>
+                            <div class="flex justify-end mt-4">
+                                <button onclick="deleteTask('${task.id}')" class="text-xs font-bold text-red-300 hover:text-red-600 transition">刪除紀錄</button>
+                            </div>
                         </div>`;
                 }
                 return cardHTML;
@@ -783,6 +803,20 @@
 
             document.getElementById('analytics-reasons').innerHTML = reasonsHtml || '<div class="text-zinc-400 font-bold py-4">目前沒有卡關紀錄。請繼續保持紀律。</div>';
         }
+
+        // 要求桌面通知權限 (定義在 module 內部供 checkNotificationStatus 呼叫)
+        window.requestNotificationPermission = () => {
+            if ("Notification" in window && !hasRequestedNotification) {
+                if (Notification.permission === "default") {
+                    hasRequestedNotification = true; 
+                    Notification.requestPermission().then(permission => {
+                        if (permission === "granted") {
+                            showToast("✅ 桌面通知已成功啟用！", "warning");
+                        }
+                    }).catch(e => console.warn("通知權限請求失敗:", e));
+                }
+            }
+        };
 
         // 啟動流程
         initFirebase();
