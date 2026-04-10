@@ -183,6 +183,24 @@
             </div>
         </main>
 
+        <!-- View 6: Check-in Modal (專注點名系統) -->
+        <main id="view-checkin" class="absolute inset-0 bg-zinc-900/95 backdrop-blur-sm z-50 hidden flex-col items-center justify-center p-6 no-scrollbar">
+            <div class="bg-white p-8 strict-border-static w-full max-w-sm text-center">
+                <div class="text-6xl mb-4 animate-bounce">🚨</div>
+                <h2 class="text-3xl font-black mb-2 text-zinc-900 tracking-tight">專注點名</h2>
+                <p class="text-zinc-600 font-bold mb-8 text-sm">任務已執行超過 30 分鐘。<br>你還在專注處理「<span id="checkin-task-title" class="text-red-600 font-black"></span>」嗎？</p>
+                
+                <div class="space-y-3">
+                    <button id="btn-confirm-checkin" class="w-full bg-zinc-900 text-white py-4 font-black text-lg hover:bg-zinc-800 transition strict-border rounded-none">
+                        我還在奮戰 (KEEP GOING)
+                    </button>
+                    <button id="btn-fail-checkin" class="w-full bg-red-50 text-red-700 py-4 font-black hover:bg-red-100 transition border-2 border-red-300">
+                        我分心了 (DISTRACTED)
+                    </button>
+                </div>
+            </div>
+        </main>
+
     </div>
 
     <!-- 導入 Firebase 模組 -->
@@ -212,6 +230,7 @@
         let timerInterval = null;
         let editingTaskId = null;
         let hasRequestedNotification = false; 
+        let isCheckInModalOpen = false; // 控制查勤視窗的開關
 
         // Firebase 基礎設施
         let db, auth, userId;
@@ -349,6 +368,7 @@
 
         // --- 視圖切換 ---
         window.switchView = (viewId) => {
+            // 切換視圖時不應隱藏 z-50 的強制彈窗，除非是程式主動關閉
             const views = ['view-dashboard', 'view-create', 'view-focus', 'view-failure', 'view-analytics'];
             views.forEach(id => {
                 const el = document.getElementById(id);
@@ -429,7 +449,6 @@
             }
 
             try {
-                // 🚀 樂觀更新 (Optimistic UI)：拔除 await，不等待伺服器回傳，讓畫面瞬間切換！
                 if (editingTaskId) {
                     updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', editingTaskId), {
                         title: title,
@@ -445,6 +464,7 @@
                         desc: desc,
                         deadline: deadlineMs,
                         startTime: null,
+                        lastCheckInTime: null, // 初始化查勤時間
                         status: 'pending', 
                         failReason: null,
                         isGraceExpired: false, 
@@ -452,7 +472,6 @@
                     });
                 }
                 
-                // 瞬間清除表單並切換回主畫面，讓手感無比滑順
                 document.getElementById('task-title').value = '';
                 document.getElementById('task-deadline').value = '';
                 document.getElementById('task-desc').value = '';
@@ -465,16 +484,67 @@
 
         window.startTask = async (id) => {
             if (!userId) return;
+            const now = new Date().getTime();
             try {
-                // 這裡一樣拔除 await，追求瞬間反應
                 updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id), {
                     status: 'in_progress',
-                    startTime: new Date().getTime()
+                    startTime: now,
+                    lastCheckInTime: now // 開始任務時寫入第一次的查勤基準點
                 });
             } catch(e) {
                 showToast('啟動失敗，請重試', 'danger');
             }
         };
+
+        // --- 查勤點名邏輯 (Check-in System) ---
+        window.openCheckInModal = (task) => {
+            isCheckInModalOpen = true;
+            document.getElementById('checkin-task-title').innerText = task.title;
+            
+            // 綁定按鈕事件
+            document.getElementById('btn-confirm-checkin').onclick = () => confirmCheckIn(task.id);
+            document.getElementById('btn-fail-checkin').onclick = () => failCheckIn(task.id);
+            
+            // 顯示查勤彈窗
+            const modal = document.getElementById('view-checkin');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            // 強制壓迫：發出聲音與桌面通知
+            window.playAlertSound();
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("🚨 專注點名！", {
+                    body: `你還在處理「${task.title}」嗎？還是已經分心了？請立刻回報！`,
+                    icon: "https://cdn-icons-png.flaticon.com/512/179/179386.png" 
+                });
+            }
+        };
+
+        window.confirmCheckIn = (taskId) => {
+            if (!userId) return;
+            // 更新最後查勤時間
+            updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', taskId), {
+                lastCheckInTime: new Date().getTime()
+            });
+            
+            // 關閉彈窗
+            const modal = document.getElementById('view-checkin');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            isCheckInModalOpen = false;
+            showToast('✅ 點名完成，請繼續保持專注。', 'warning');
+        };
+
+        window.failCheckIn = (taskId) => {
+            // 承認分心，直接踢到失敗覆盤頁面
+            const modal = document.getElementById('view-checkin');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            isCheckInModalOpen = false;
+            window.openFailureScreen(taskId);
+            showToast('💀 意志力潰散被系統捕獲，請進行覆盤。', 'danger');
+        };
+
 
         window.enterFocusMode = (id) => {
             const task = tasks.find(t => t.id === id);
@@ -513,7 +583,6 @@
         window.deleteTask = async (id) => {
             if (!userId) return;
             try {
-                // 直接從雲端刪除文件
                 await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', id));
                 showToast("任務紀錄已永久刪除", "warning");
             } catch(e) {
@@ -679,6 +748,14 @@
                     const timeOverdue = now - task.deadline;
                     const remainingStr = getRemainingTimeString(task.deadline).replace('-', '').replace(' (已逾期)', '');
 
+                    // 🚨 查勤點名邏輯 (Check-in Logic): 30 分鐘 = 30 * 60 * 1000 = 1800000 毫秒
+                    const CHECKIN_INTERVAL = 30 * 60 * 1000;
+                    const lastCheck = task.lastCheckInTime || task.startTime; 
+                    if ((now - lastCheck) >= CHECKIN_INTERVAL && !isCheckInModalOpen) {
+                        openCheckInModal(task);
+                    }
+
+                    // 進度與逾期提醒邏輯
                     if (timeOverdue > gracePeriod) {
                         if (!task.reminders.graceExpired) {
                             showToast(`💀 任務「${task.title}」已超過 10% 緩衝期！這是一場苦戰，但你仍可完成它。`, 'danger');
